@@ -150,7 +150,7 @@ final class BrasletStore: ObservableObject {
                              into: \.heart)
         added += mergePoints(oxygen.filter { Self.plausible($0, forHeart: false) },
                              into: \.oxygen)
-        added += mergePoints(hrv.filter { Self.hrvRange.contains($0.value) },
+        added += mergePoints(hrv.filter { self.plausibleHRV($0.value) },
                              into: \.hrv)
         added += mergePoints(temperature.filter { Self.temperatureRange.contains($0.value) },
                              into: \.temperature)
@@ -256,6 +256,19 @@ final class BrasletStore: ObservableObject {
 
     private static func plausible(_ point: MetricPoint, forHeart: Bool) -> Bool {
         forHeart ? (25...250).contains(point.value) : (50...100).contains(point.value)
+    }
+
+    /// HRV принимаем, если она в физдиапазоне И не резкий провал почти вдвое
+    /// ниже недавней медианы. Такие «ямы» (вроде 32 при обычных 55–70) даёт
+    /// потеря контакта при снятии браслета, а не настоящая вариабельность;
+    /// честный послетренировочный спад (условно 50) остаётся. Пока истории
+    /// мало — не судим, пропускаем всё.
+    private func plausibleHRV(_ value: Double) -> Bool {
+        guard Self.hrvRange.contains(value) else { return false }
+        let recent = data.hrv.suffix(20).map(\.value).sorted()
+        guard recent.count >= 8 else { return true }
+        let median = recent[recent.count / 2]
+        return value >= median * 0.55
     }
 
     private func mergePoints(_ incoming: [MetricPoint],
