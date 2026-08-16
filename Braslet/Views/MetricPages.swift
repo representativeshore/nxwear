@@ -8,6 +8,9 @@ struct MetricPages: View {
     @ObservedObject var collector: BraceletCollector
 
     @State private var expanded: Metric?
+    /// Какой показатель сейчас меряется — чтобы на его плитке была надпись
+    /// «замер», а на остальных осталась «измерить» (обе инактивны).
+    @State private var measuring: Metric?
     @Namespace private var ns
 
     enum Metric: String, CaseIterable, Identifiable {
@@ -74,7 +77,8 @@ struct MetricPages: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     GridRow {
                         ForEach(row) { metric in
-                            Tile(metric: metric, store: store, collector: collector)
+                            Tile(metric: metric, store: store, collector: collector,
+                                 measuring: $measuring)
                                 .contentShape(.rect)
                                 .onTapGesture { withAnimation(spring) { expanded = metric } }
                         }
@@ -101,6 +105,7 @@ private struct Tile: View {
     let metric: MetricPages.Metric
     @ObservedObject var store: BrasletStore
     @ObservedObject var collector: BraceletCollector
+    @Binding var measuring: MetricPages.Metric?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -142,7 +147,9 @@ private struct Tile: View {
         Button {
             Task { await measureNow() }
         } label: {
-            Text(collector.busy != nil ? "замер…" : "измерить")
+            // На измеряемой плитке — «замер» (без троеточия), на остальных
+            // «измерить»; обе инактивны, пока идёт замер.
+            Text(measuring == metric ? "замер" : "измерить")
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -156,6 +163,8 @@ private struct Tile: View {
     }
 
     private func measureNow() async {
+        measuring = metric
+        defer { measuring = nil }
         switch metric {
         case .heart:
             // Через keep (а не store.absorbHarvest напрямую) — тогда замер, как
