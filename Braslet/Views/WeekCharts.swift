@@ -18,15 +18,24 @@ enum ChartLook {
     static let corner: CGFloat = 4
     static let axisCount = 3
 
-    /// Диапазон оси X по датам. Раньше X был строкой дня недели, и на месяце
-    /// «пн»…«вс» повторялись — Charts считал их одной категорией и клеил бары
-    /// разных недель в семь столбцов. Теперь X — дата (уникальна), а диапазон
-    /// задаём явно, чтобы крайние пустые дни тоже занимали своё место.
-    static func xDomain(_ days: [Date]) -> ClosedRange<Date> {
-        let lo = days.min() ?? Date()
-        let hi = days.max() ?? Date()
-        let pad: TimeInterval = 12 * 3600
-        return lo.addingTimeInterval(-pad)...hi.addingTimeInterval(pad)
+    /// Уникальный ключ дня — категория оси X. Раньше X был строкой дня недели,
+    /// и на месяце «пн»…«вс» повторялись → Charts клеил бары разных недель в
+    /// семь столбцов. Непрерывная дата слипание чинила, но BarMark на временной
+    /// оси терял дискретную ширину «на день» — свечи диапазона исчезали.
+    /// Уникальный ключ даёт и раздельные дни, и нормальные столбики.
+    static func dayKey(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
+    }
+
+    /// Домен оси — ключи всех дней по порядку (в т.ч. пустые), иначе один
+    /// день с данными растянется на всю ширину.
+    static func domain(_ days: [Date]) -> [String] { days.map(dayKey) }
+
+    /// Ключ дня → короткая подпись дня недели, для оси на неделе.
+    static func weekdayLabels(_ days: [Date]) -> [String: String] {
+        Dictionary(days.map { (dayKey($0), Fmt.weekdayShort($0)) },
+                   uniquingKeysWith: { first, _ in first })
     }
 }
 
@@ -61,7 +70,7 @@ struct SleepWeekChart: View {
                 if let night = item.night {
                     ForEach(stackedBars(for: night), id: \.stage) { bar in
                         BarMark(
-                            x: .value("День", item.day),
+                            x: .value("День", ChartLook.dayKey(item.day)),
                             yStart: .value("От", bar.from),
                             yEnd: .value("До", bar.to),
                             width: ChartLook.barWidth(week.count))
@@ -78,7 +87,7 @@ struct SleepWeekChart: View {
             }
         }
         .chartForegroundStyleScale(domain: order.map(\.title), range: order.map(\.color))
-        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
+        .chartXScale(domain: ChartLook.domain(week.map(\.day)))
         .chartYScale(domain: 0...maxMinutes)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
@@ -92,10 +101,11 @@ struct SleepWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                // X теперь дата — подписи дней недели ставим сами по каждому дню.
-                AxisMarks(values: week.map(\.day)) { value in
-                    if let day = value.as(Date.self) {
-                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                // X — ключ дня; подпись дня недели берём из карты ключ→день.
+                let labels = ChartLook.weekdayLabels(week.map(\.day))
+                AxisMarks(values: ChartLook.domain(week.map(\.day))) { value in
+                    if let key = value.as(String.self) {
+                        AxisValueLabel { Text(labels[key] ?? "").font(.caption2) }
                     }
                 }
             } else {
@@ -154,21 +164,21 @@ struct MetricWeekChart: View {
         Chart {
             ForEach(Array(week.enumerated()), id: \.offset) { _, item in
                 if let stat = item.stat {
-                    BarMark(x: .value("День", item.day),
+                    BarMark(x: .value("День", ChartLook.dayKey(item.day)),
                             yStart: .value("Мин", stat.low),
                             yEnd: .value("Макс", stat.high),
                             width: ChartLook.barWidth(week.count))
                         .foregroundStyle(tint.opacity(0.28))
                         .cornerRadius(ChartLook.corner)
 
-                    PointMark(x: .value("День", item.day),
+                    PointMark(x: .value("День", ChartLook.dayKey(item.day)),
                               y: .value("Среднее", stat.average))
                         .foregroundStyle(tint)
                         .symbolSize(60)
                 }
             }
         }
-        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
+        .chartXScale(domain: ChartLook.domain(week.map(\.day)))
         .chartYScale(domain: bounds)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
@@ -182,10 +192,11 @@ struct MetricWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                // X теперь дата — подписи дней недели ставим сами по каждому дню.
-                AxisMarks(values: week.map(\.day)) { value in
-                    if let day = value.as(Date.self) {
-                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                // X — ключ дня; подпись дня недели берём из карты ключ→день.
+                let labels = ChartLook.weekdayLabels(week.map(\.day))
+                AxisMarks(values: ChartLook.domain(week.map(\.day))) { value in
+                    if let key = value.as(String.self) {
+                        AxisValueLabel { Text(labels[key] ?? "").font(.caption2) }
                     }
                 }
             } else {
@@ -210,7 +221,7 @@ struct StepsWeekChart: View {
     var body: some View {
         Chart {
             ForEach(week) { day in
-                BarMark(x: .value("День", day.day),
+                BarMark(x: .value("День", ChartLook.dayKey(day.day)),
                         y: .value("Шаги", day.steps),
                         width: ChartLook.barWidth(week.count))
                     .foregroundStyle(Palette.steps)
@@ -232,7 +243,7 @@ struct StepsWeekChart: View {
                     .foregroundStyle(Palette.grid)
             }
         }
-        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
+        .chartXScale(domain: ChartLook.domain(week.map(\.day)))
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
                 AxisGridLine().foregroundStyle(Palette.grid)
@@ -245,10 +256,11 @@ struct StepsWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                // X теперь дата — подписи дней недели ставим сами по каждому дню.
-                AxisMarks(values: week.map(\.day)) { value in
-                    if let day = value.as(Date.self) {
-                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                // X — ключ дня; подпись дня недели берём из карты ключ→день.
+                let labels = ChartLook.weekdayLabels(week.map(\.day))
+                AxisMarks(values: ChartLook.domain(week.map(\.day))) { value in
+                    if let key = value.as(String.self) {
+                        AxisValueLabel { Text(labels[key] ?? "").font(.caption2) }
                     }
                 }
             } else {
