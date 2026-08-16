@@ -24,7 +24,27 @@ extension BrasletStore {
         Recovery.compute(hrv: dailySeries(hrv),
                          restingHeart: restingHeartSeries(),
                          deepSleepMinutes: deepSleepSeries(),
-                         temperature: dailySeries(temperature))
+                         temperature: dailySeries(temperature),
+                         trainingLoad: workoutLoad)
+    }
+
+    /// Тянет тренировки из «Здоровья» и складывает дневную серию калорий
+    /// (по календарным дням, с нулями за дни без тренировок, сегодня в конце) —
+    /// её ест фактор «Нагрузка». Зовём при входе на экран и после синка.
+    func refreshWorkoutLoad(days: Int = 30) {
+        Task {
+            let workouts = await HealthService.shared.recentWorkouts(days: days)
+            let cal = Calendar.current
+            var byDay: [Date: Double] = [:]
+            for w in workouts {
+                byDay[cal.startOfDay(for: w.date), default: 0] += w.energyKcal ?? 0
+            }
+            let today = cal.startOfDay(for: Date())
+            let series = (0..<days).reversed().compactMap { back -> Double? in
+                cal.date(byAdding: .day, value: -back, to: today).map { byDay[$0] ?? 0 }
+            }
+            updateWorkoutLoad(series)
+        }
     }
 
     // MARK: - Дневные ряды

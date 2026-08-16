@@ -177,7 +177,11 @@ final class BraceletCollector: NSObject, ObservableObject {
                     if let value = await self.measureHRV() {
                         self.keep(value, as: \.hrv); measured = true
                     }
-                    if let value = await self.measureTemperature() {
+                    // Температуру — только когда браслет прогрелся до кожи после
+                    // надевания (~20 мин): раннее значение занижено и испортило
+                    // бы baseline и восстановление.
+                    if WornStore.temperatureSettled,
+                       let value = await self.measureTemperature() {
                         self.keep(value, as: \.temperature); measured = true
                     }
                     if measured { self.lastExtraMeasure = Date() }

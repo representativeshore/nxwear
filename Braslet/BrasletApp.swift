@@ -37,7 +37,7 @@ struct BrasletApp: App {
                         for w in list.prefix(15) {
                             let kcal = w.energyKcal.map { " \(Int($0)) ккал" } ?? ""
                             Journal.shared.add("  \(Fmt.day(w.date)) \(Fmt.time(w.date)) "
-                                + "\(w.title) \(Int(w.duration / 60)) мин\(kcal)")
+                                + "тип \(w.activity.rawValue) \(Int(w.duration / 60)) мин\(kcal)")
                         }
                     }
                     if CommandLine.arguments.contains("-resyncSleep") {

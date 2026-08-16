@@ -21,6 +21,16 @@ final class BrasletStore: ObservableObject {
     @Published private(set) var battery: Int?
     @Published private(set) var marks: [Mark] = []
     @Published private(set) var lastSync: Date?
+    /// Дневные калории тренировок из «Здоровья» (тренировки с AirPods/Watch),
+    /// старые дни впереди, сегодня в конце. Кормит фактор «Нагрузка»
+    /// в восстановлении. Не персистим — источник HealthKit, читаем при входе.
+    @Published private(set) var workoutLoad: [Double] = []
+
+    /// Сеттер для `workoutLoad` — расширение `Store+Recovery` лежит в другом
+    /// файле и приватный сеттер оттуда не виден.
+    func updateWorkoutLoad(_ series: [Double]) {
+        if workoutLoad != series { workoutLoad = series }
+    }
     @Published var status: Status?
 
     struct Status: Identifiable {

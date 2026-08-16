@@ -131,11 +131,12 @@ private struct FactorRow: View {
                 .font(.caption)
             Spacer()
             if let z = factor.z {
-                // Стрелка направления: выше нормы, около, ниже.
+                // Стрелка направления: зелёный вверх — хорошо для восстановления,
+                // красный вниз — плохо. z везде «восстановительный» (плюс = лучше).
                 Image(systemName: z > 0.4 ? "arrow.up" : (z < -0.4 ? "arrow.down" : "equal"))
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(z > 0.4 ? Palette.oxygen : (z < -0.4 ? Palette.heart : .secondary))
-                Text(status(z))
+                Text(statusText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
@@ -146,7 +147,14 @@ private struct FactorRow: View {
         }
     }
 
-    private func status(_ z: Double) -> String {
+    /// У нагрузки «выше/ниже нормы» читалось бы наоборот (z инвертирован),
+    /// поэтому показываем фактические калории тренировки за день.
+    private var statusText: String {
+        if factor.key == .trainingLoad {
+            let kcal = Int((factor.today ?? 0).rounded())
+            return kcal > 0 ? "\(kcal) ккал" : "нет"
+        }
+        guard let z = factor.z else { return "" }
         if z > 0.4 { return "выше нормы" }
         if z < -0.4 { return "ниже нормы" }
         return "как обычно"

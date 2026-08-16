@@ -2,29 +2,15 @@ import CoreLocation
 import Foundation
 import HealthKit
 
-/// Тренировка, прочитанная из «Здоровья» (обычно записана Apple Watch).
+/// Тренировка, прочитанная из «Здоровья» (обычно записана AirPods/Apple Watch).
+/// Нужна только для учёта нагрузки в восстановлении — в интерфейсе тренировки
+/// не показываем, поэтому названий/иконок типов тут нет, лишь сырые данные.
 struct WorkoutInfo: Identifiable {
     let id = UUID()
     let date: Date
     let activity: HKWorkoutActivityType
     let duration: TimeInterval
     let energyKcal: Double?
-
-    var title: String {
-        switch activity {
-        case .running: return "Бег"
-        case .walking: return "Ходьба"
-        case .cycling: return "Велосипед"
-        case .traditionalStrengthTraining: return "Силовая"
-        case .functionalStrengthTraining: return "Функциональная"
-        case .highIntensityIntervalTraining: return "ВИИТ"
-        case .coreTraining: return "Кор"
-        case .mixedCardio: return "Кардио"
-        case .swimming: return "Плавание"
-        case .yoga: return "Йога"
-        default: return "Тренировка"
-        }
-    }
 }
 
 /// Запись сна в «Здоровье».

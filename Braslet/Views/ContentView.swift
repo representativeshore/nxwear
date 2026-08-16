@@ -44,9 +44,15 @@ struct ContentView: View {
         .padding(.top, 6)
         .padding(.bottom, 10)
         .background(GlassBackdrop())
-        .task { store.importFromDocuments() }
+        .task {
+            store.importFromDocuments()
+            store.refreshWorkoutLoad()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { collector.refreshWorn() }
+            if phase == .active {
+                collector.refreshWorn()
+                store.refreshWorkoutLoad()
+            }
         }
         .sheet(isPresented: $showsLog) { LogView() }
     }

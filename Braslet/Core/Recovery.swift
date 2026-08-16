@@ -43,13 +43,14 @@ enum Recovery {
         var available: Bool { z != nil }
 
         enum Key: String {
-            case hrv, restingHeart, deepSleep, temperature
+            case hrv, restingHeart, deepSleep, temperature, trainingLoad
             var title: String {
                 switch self {
                 case .hrv: return "HRV"
                 case .restingHeart: return "Пульс покоя"
                 case .deepSleep: return "Глубокий сон"
                 case .temperature: return "Температура"
+                case .trainingLoad: return "Нагрузка"
                 }
             }
         }
@@ -76,6 +77,9 @@ enum Recovery {
     /// и плотности браслета), поэтому вес маленький.
     private static let weights: [Factor.Key: Double] = [
         .hrv: 0.45, .restingHeart: 0.30, .deepSleep: 0.20, .temperature: 0.05,
+        // Нагрузка — небольшой вес: тяжёлая тренировка и так бьёт по HRV/пульсу
+        // покоя, поэтому напрямую только слегка темперируем, без двойного удара.
+        .trainingLoad: 0.10,
     ]
 
     /// Считает оценку из дневных рядов показателей.
@@ -86,12 +90,17 @@ enum Recovery {
     static func compute(hrv: [Double],
                         restingHeart: [Double],
                         deepSleepMinutes: [Double],
-                        temperature: [Double]) -> Score {
+                        temperature: [Double],
+                        trainingLoad: [Double] = []) -> Score {
         let factors: [Factor] = [
             factor(.hrv, hrv, higherIsBetter: true),
             factor(.restingHeart, restingHeart, higherIsBetter: false),
             factor(.deepSleep, deepSleepMinutes, higherIsBetter: true),
             factor(.temperature, temperature, higherIsBetter: false, minDays: 6),
+            // Дневные калории тренировок: больше обычного = острая нагрузка =
+            // хуже для восстановления. Пустая история (нет тренировок) → sd=0 →
+            // фактор не считается и балл не трогает.
+            factor(.trainingLoad, trainingLoad, higherIsBetter: false),
         ]
 
         // Взвешенный композит по доступным входам.
