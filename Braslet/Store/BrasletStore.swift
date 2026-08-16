@@ -180,7 +180,7 @@ final class BrasletStore: ObservableObject {
 
     @discardableResult
     private func absorb(_ snap: BrasletSnapshot) -> Int {
-        var added = mergeSleep(snap.sleep)
+        var added = mergeSleep(snap.sleep, finalize: false)  // финализируем в конце
 
         // Шаги за день приходят накопительным итогом: побеждает больший.
         var byDay = Dictionary(uniqueKeysWithValues: data.steps.map { ($0.day, $0) })

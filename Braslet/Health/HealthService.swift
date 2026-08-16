@@ -120,26 +120,35 @@ final class HealthService: ObservableObject {
 
         var samples: [HKSample] = []
 
-        let bpm = HKUnit.count().unitDivided(by: .minute())
-        samples += await replaceOwn(heartType, points: harvest.heart) {
-            HKQuantitySample(type: heartType,
-                             quantity: HKQuantity(unit: bpm, doubleValue: $0.value),
-                             start: $0.time, end: $0.time)
+        if store.authorizationStatus(for: heartType) == .sharingAuthorized {
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            samples += harvest.heart.map {
+                HKQuantitySample(type: heartType,
+                                 quantity: HKQuantity(unit: bpm, doubleValue: $0.value),
+                                 start: $0.time, end: $0.time,
+                                 metadata: Self.syncMeta("hr", $0))
+            }
         }
 
-        samples += await replaceOwn(oxygenType, points: harvest.oxygen) {
-            HKQuantitySample(type: oxygenType,
-                             quantity: HKQuantity(unit: .percent(), doubleValue: $0.value / 100),
-                             start: $0.time, end: $0.time)
+        if store.authorizationStatus(for: oxygenType) == .sharingAuthorized {
+            samples += harvest.oxygen.map {
+                HKQuantitySample(type: oxygenType,
+                                 quantity: HKQuantity(unit: .percent(), doubleValue: $0.value / 100),
+                                 start: $0.time, end: $0.time,
+                                 metadata: Self.syncMeta("spo2", $0))
+            }
         }
 
         // Вариабельность пульса «Здоровье» хранит в миллисекундах —
         // ровно в том виде, в каком её отдаёт браслет.
-        let ms = HKUnit.secondUnit(with: .milli)
-        samples += await replaceOwn(hrvType, points: harvest.hrv) {
-            HKQuantitySample(type: hrvType,
-                             quantity: HKQuantity(unit: ms, doubleValue: $0.value),
-                             start: $0.time, end: $0.time)
+        if store.authorizationStatus(for: hrvType) == .sharingAuthorized {
+            let ms = HKUnit.secondUnit(with: .milli)
+            samples += harvest.hrv.map {
+                HKQuantitySample(type: hrvType,
+                                 quantity: HKQuantity(unit: ms, doubleValue: $0.value),
+                                 start: $0.time, end: $0.time,
+                                 metadata: Self.syncMeta("hrv", $0))
+            }
         }
 
         // Температуру в «Здоровье» не пишем: единственное поле, семантически
@@ -180,22 +189,14 @@ final class HealthService: ObservableObject {
         try? await store.save(samples)
     }
 
-    /// Идемпотентная запись точечных образцов: сначала стираем СВОИ образцы
-    /// этого типа в диапазоне [первая…последняя точка], потом отдаём новые.
-    /// Так повторная отправка одних и тех же данных (импорт файла, повторный
-    /// sync) не плодит дубли, а чужие источники (Apple Watch) не трогаются —
-    /// `deleteObjects` стирает только образцы этого приложения.
-    private func replaceOwn(_ type: HKQuantityType, points: [MetricPoint],
-                            make: (MetricPoint) -> HKQuantitySample) async -> [HKSample] {
-        guard !points.isEmpty,
-              store.authorizationStatus(for: type) == .sharingAuthorized else { return [] }
-        let times = points.map(\.time)
-        if let lo = times.min(), let hi = times.max() {
-            let predicate = HKQuery.predicateForSamples(
-                withStart: lo, end: hi.addingTimeInterval(1))
-            _ = try? await store.deleteObjects(of: type, predicate: predicate)
-        }
-        return points.map(make)
+    /// Дедуп точечных образцов родным механизмом HealthKit: стабильный
+    /// `syncIdentifier` (тип + метка времени) означает «это тот же образец» —
+    /// повторная запись обновляет его на месте, а не плодит дубль. В отличие от
+    /// стирания по диапазону это не трогает ни чужие источники, ни соседние
+    /// свои образцы, и нет неатомарного delete-then-save.
+    private static func syncMeta(_ prefix: String, _ point: MetricPoint) -> [String: Any] {
+        [HKMetadataKeySyncIdentifier: "\(prefix)-\(Int(point.time.timeIntervalSince1970 * 1000))",
+         HKMetadataKeySyncVersion: 1]
     }
 
     var canWrite: Bool {

@@ -169,11 +169,16 @@ final class MarkLocator: NSObject, CLLocationManagerDelegate {
     }
 
     func fetch(_ done: @escaping (CLLocation?) -> Void) {
+        // Повторный requestLocation отменяет предыдущий (CLLocationManager
+        // так устроен) и порождает ложный fail, который дренил бы очередь в nil.
+        // Поэтому если запрос уже в полёте — просто становимся в очередь, его
+        // единственный результат раздадим всем.
+        let idle = pending.isEmpty
         pending.append(done)
         if manager.authorizationStatus == .notDetermined {
             manager.requestWhenInUseAuthorization()
         }
-        manager.requestLocation()
+        if idle { manager.requestLocation() }
     }
 
     private func deliver(_ location: CLLocation?) {
