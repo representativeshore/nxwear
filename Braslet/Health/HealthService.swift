@@ -120,33 +120,26 @@ final class HealthService: ObservableObject {
 
         var samples: [HKSample] = []
 
-        if store.authorizationStatus(for: heartType) == .sharingAuthorized {
-            let unit = HKUnit.count().unitDivided(by: .minute())
-            samples += harvest.heart.map {
-                HKQuantitySample(type: heartType,
-                                 quantity: HKQuantity(unit: unit, doubleValue: $0.value),
-                                 start: $0.time, end: $0.time)
-            }
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        samples += await replaceOwn(heartType, points: harvest.heart) {
+            HKQuantitySample(type: heartType,
+                             quantity: HKQuantity(unit: bpm, doubleValue: $0.value),
+                             start: $0.time, end: $0.time)
         }
 
-        if store.authorizationStatus(for: oxygenType) == .sharingAuthorized {
-            samples += harvest.oxygen.map {
-                HKQuantitySample(type: oxygenType,
-                                 quantity: HKQuantity(unit: .percent(),
-                                                      doubleValue: $0.value / 100),
-                                 start: $0.time, end: $0.time)
-            }
+        samples += await replaceOwn(oxygenType, points: harvest.oxygen) {
+            HKQuantitySample(type: oxygenType,
+                             quantity: HKQuantity(unit: .percent(), doubleValue: $0.value / 100),
+                             start: $0.time, end: $0.time)
         }
 
         // Вариабельность пульса «Здоровье» хранит в миллисекундах —
         // ровно в том виде, в каком её отдаёт браслет.
-        if store.authorizationStatus(for: hrvType) == .sharingAuthorized {
-            let unit = HKUnit.secondUnit(with: .milli)
-            samples += harvest.hrv.map {
-                HKQuantitySample(type: hrvType,
-                                 quantity: HKQuantity(unit: unit, doubleValue: $0.value),
-                                 start: $0.time, end: $0.time)
-            }
+        let ms = HKUnit.secondUnit(with: .milli)
+        samples += await replaceOwn(hrvType, points: harvest.hrv) {
+            HKQuantitySample(type: hrvType,
+                             quantity: HKQuantity(unit: ms, doubleValue: $0.value),
+                             start: $0.time, end: $0.time)
         }
 
         // Температуру в «Здоровье» не пишем: единственное поле, семантически
@@ -185,6 +178,24 @@ final class HealthService: ObservableObject {
 
         guard !samples.isEmpty else { return }
         try? await store.save(samples)
+    }
+
+    /// Идемпотентная запись точечных образцов: сначала стираем СВОИ образцы
+    /// этого типа в диапазоне [первая…последняя точка], потом отдаём новые.
+    /// Так повторная отправка одних и тех же данных (импорт файла, повторный
+    /// sync) не плодит дубли, а чужие источники (Apple Watch) не трогаются —
+    /// `deleteObjects` стирает только образцы этого приложения.
+    private func replaceOwn(_ type: HKQuantityType, points: [MetricPoint],
+                            make: (MetricPoint) -> HKQuantitySample) async -> [HKSample] {
+        guard !points.isEmpty,
+              store.authorizationStatus(for: type) == .sharingAuthorized else { return [] }
+        let times = points.map(\.time)
+        if let lo = times.min(), let hi = times.max() {
+            let predicate = HKQuery.predicateForSamples(
+                withStart: lo, end: hi.addingTimeInterval(1))
+            _ = try? await store.deleteObjects(of: type, predicate: predicate)
+        }
+        return points.map(make)
     }
 
     var canWrite: Bool {

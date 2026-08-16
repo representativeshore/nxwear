@@ -64,46 +64,47 @@ enum BraceletProtocol {
             case abandoned(type: UInt8, got: Int, expected: Int)
         }
 
-        mutating func accept(_ frame: Data) -> Event? {
-            guard !frame.isEmpty else { return nil }
+        /// Возвращает СПИСОК событий: если новый заголовок пришёл поверх
+        /// недособранной посылки, надо и сообщить об обрыве старой, и обработать
+        /// новую. Раньше отдавалось одно событие — новое одиночное сообщение
+        /// молча терялось и не подтверждалось, и браслет рвал связь.
+        mutating func accept(_ frame: Data) -> [Event] {
+            guard !frame.isEmpty else { return [] }
 
             if frame[0] != 0 {
-                guard var current = pending else { return nil }
+                guard var current = pending else { return [] }
                 current.data.append(frame.subdata(in: 1..<frame.count))
                 current.left -= 1
                 if current.left <= 0 {
                     pending = nil
-                    return .message(type: current.type, seq: current.seq,
-                                    body: current.data.prefix(current.length))
+                    return [.message(type: current.type, seq: current.seq,
+                                     body: current.data.prefix(current.length))]
                 }
                 pending = current
-                return nil
+                return []
             }
 
-            guard frame.count >= headerSize else { return nil }
-            if frame[4] & 0x0F == 4 { return .acknowledged(frame[5]) }
+            guard frame.count >= headerSize else { return [] }
+            if frame[4] & 0x0F == 4 { return [.acknowledged(frame[5])] }
 
             let pages = Int(frame[2])
             let length = Int(frame[8]) | (Int(frame[9]) << 8)
             let head = frame.subdata(in: headerSize..<frame.count)
 
+            var events: [Event] = []
+            if let lost = pending {
+                events.append(.abandoned(type: lost.type, got: lost.data.count,
+                                         expected: lost.length))
+            }
             if pages == 0 {
-                let lost = pending
                 pending = nil
-                if let lost {
-                    return .abandoned(type: lost.type, got: lost.data.count,
-                                      expected: lost.length)
-                }
-                return .message(type: frame[5], seq: frame[3], body: head.prefix(length))
+                events.append(.message(type: frame[5], seq: frame[3],
+                                       body: head.prefix(length)))
+            } else {
+                pending = (frame[5], frame[3], length, head, pages)
+                events.append(.started(type: frame[5], pages: pages, length: length))
             }
-
-            let lost = pending
-            pending = (frame[5], frame[3], length, head, pages)
-            if let lost {
-                return .abandoned(type: lost.type, got: lost.data.count,
-                                  expected: lost.length)
-            }
-            return .started(type: frame[5], pages: pages, length: length)
+            return events
         }
     }
 

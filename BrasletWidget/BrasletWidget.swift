@@ -101,10 +101,15 @@ struct WidgetBackground: View {
                 Self.alarm
             } else {
                 Color(.secondarySystemGroupedBackground)
-                corner(corners.topLeading, at: .topLeading)
-                corner(corners.topTrailing, at: .topTrailing)
-                corner(corners.bottomLeading, at: .bottomLeading)
-                corner(corners.bottomTrailing, at: .bottomTrailing)
+                // Угловые подсветки — подсказка «где какая плитка» — верны только
+                // для сеточного layout (small/medium). У большого виджета своя
+                // раскладка (шапка + 5 плиток + кнопка), там они бы врали.
+                if family != .systemLarge {
+                    corner(corners.topLeading, at: .topLeading)
+                    corner(corners.topTrailing, at: .topTrailing)
+                    corner(corners.bottomLeading, at: .bottomLeading)
+                    corner(corners.bottomTrailing, at: .bottomTrailing)
+                }
             }
         }
     }

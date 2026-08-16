@@ -170,13 +170,17 @@ final class BraceletCollector: NSObject, ObservableObject {
                 // Раз в час снимаем их сами: чаще незачем, обе меняются
                 // медленно, а датчик каждый раз горит почти минуту.
                 if WornStore.value, Date().timeIntervalSince(self.lastExtraMeasure) > 3600 {
-                    self.lastExtraMeasure = Date()
+                    // Час отсчитываем от УДАЧНОГО замера: если сенсор был занят
+                    // (юзер тапнул «измерить») и замер не прошёл, не проглатываем
+                    // целый час, а пробуем в следующую синхронизацию.
+                    var measured = false
                     if let value = await self.measureHRV() {
-                        self.keep(value, as: \.hrv)
+                        self.keep(value, as: \.hrv); measured = true
                     }
                     if let value = await self.measureTemperature() {
-                        self.keep(value, as: \.temperature)
+                        self.keep(value, as: \.temperature); measured = true
                     }
+                    if measured { self.lastExtraMeasure = Date() }
                 }
             }
         }
@@ -272,7 +276,6 @@ final class BraceletCollector: NSObject, ObservableObject {
     /// Что сейчас делаем по кнопке — показывается в карточке.
     @Published private(set) var busy: String?
 
-    private var waiters: [UInt8: (Data) -> Void] = [:]
     /// Ловит все посылки во время замера — чтобы отсеять старые записи.
     private var freshSink: ((UInt8, Data) -> Void)?
     /// Пока идёт замер, не гасим датчики страховкой при переподключении.
@@ -457,7 +460,9 @@ final class BraceletCollector: NSObject, ObservableObject {
                     return
                 }
                 let harvest = BraceletProtocol.parse(type: type, body: body)
-                let fresh = harvest.heart.filter {
+                // Кислород парсер кладёт в .oxygen, а не .heart — без него замер
+                // SpO₂ (тип 20) всегда возвращал nil: сенсор горел зря 45 секунд.
+                let fresh = (harvest.heart + harvest.oxygen).filter {
                     Date().timeIntervalSince($0.time) < 120
                 }
                 guard let newest = fresh.max(by: { $0.time < $1.time }) else {
@@ -685,7 +690,9 @@ final class BraceletCollector: NSObject, ObservableObject {
     /// и сон, и замеры.
     private func introduce() {
         let now = UInt32(Date().timeIntervalSince1970)
-        let offset = UInt32(TimeZone.current.secondsFromGMT())
+        // secondsFromGMT() отрицателен в западных зонах — прямой UInt32(...)
+        // крашил. Кодируем знаковое смещение как два дополнения (те же 4 байта).
+        let offset = UInt32(bitPattern: Int32(TimeZone.current.secondsFromGMT()))
         send(104, [UInt8(now & 0xFF), UInt8((now >> 8) & 0xFF),
                    UInt8((now >> 16) & 0xFF), UInt8((now >> 24) & 0xFF),
                    UInt8(offset & 0xFF), UInt8((offset >> 8) & 0xFF),
@@ -694,8 +701,9 @@ final class BraceletCollector: NSObject, ObservableObject {
 
         // Профиль: идентификатор, пол, возраст, рост, вес — как в перехвате.
         send(102, [0x4e, 0xe9, 0x09, 0x00, 1,
-                   UInt8(Profile.age), UInt8(Profile.heightCm),
-                   UInt8(Int(Profile.weightKg)), 0])
+                   UInt8(min(255, max(0, Profile.age))),
+                   UInt8(min(255, max(0, Profile.heightCm))),
+                   UInt8(min(255, max(0, Int(Profile.weightKg)))), 0])
 
         // Автоматические замеры (`K6_DATA_TYPE_HEART_AUTO_SWITCH`, 8 байт):
         // пульс включён, раз в полчаса, кислород тоже.
@@ -1061,27 +1069,26 @@ extension BraceletCollector: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard let value = characteristic.value else { return }
 
         Task { @MainActor in
-            switch reassembler.accept(value) {
-            case .message(let type, let seq, let body):
-                // Пишем тело целиком, а не первые байты: на обрезанных
-                // записях уже один раз потерялось содержимое посылок,
-                // которые мы не разбирали.
-                journal.add("← \(type) (\(body.count) б): "
-                          + body.prefix(96).map { String(format: "%02x", $0) }.joined())
-                // Подтверждаем сразу и в обход очереди: браслет ждёт ответа
-                // на каждую посылку и без него разрывает связь.
-                acknowledge(type: type, seq: seq)
-                freshSink?(type, body)
-                waiters.removeValue(forKey: type)?(body)
-                absorb(type: type, body: body)
-            case .started(let type, let pages, let length):
-                journal.add("… начало \(type): \(pages) кусков, \(length) б")
-            case .abandoned(let type, let got, let expected):
-                journal.add("⚠️ посылка \(type) оборвана: собрано \(got) из \(expected)")
-            case .acknowledged(let type):
-                journal.add("✓ подтверждено \(type)")
-            case .none:
-                break
+            for event in reassembler.accept(value) {
+                switch event {
+                case .message(let type, let seq, let body):
+                    // Пишем тело целиком, а не первые байты: на обрезанных
+                    // записях уже один раз потерялось содержимое посылок,
+                    // которые мы не разбирали.
+                    journal.add("← \(type) (\(body.count) б): "
+                              + body.prefix(96).map { String(format: "%02x", $0) }.joined())
+                    // Подтверждаем сразу и в обход очереди: браслет ждёт ответа
+                    // на каждую посылку и без него разрывает связь.
+                    acknowledge(type: type, seq: seq)
+                    freshSink?(type, body)
+                    absorb(type: type, body: body)
+                case .started(let type, let pages, let length):
+                    journal.add("… начало \(type): \(pages) кусков, \(length) б")
+                case .abandoned(let type, let got, let expected):
+                    journal.add("⚠️ посылка \(type) оборвана: собрано \(got) из \(expected)")
+                case .acknowledged(let type):
+                    journal.add("✓ подтверждено \(type)")
+                }
             }
         }
     }

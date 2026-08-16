@@ -42,8 +42,13 @@ enum SleepStaging {
             case 3, 4, 5:
                 let ts = UInt32(r[2]) | UInt32(r[3]) << 8
                        | UInt32(r[4]) << 16 | UInt32(r[5]) << 24
-                if (1_780_000_000...1_800_000_000).contains(ts) {
-                    clock = Date(timeIntervalSince1970: TimeInterval(ts))
+                // Отсечка мусора (нули/битые метки) — скользящая, не фикс-дата:
+                // прежняя верхняя граница 1_800_000_000 = 15 января 2027, после
+                // которой clock не выставлялся бы и пульс тихо переставал писаться.
+                let seconds = TimeInterval(ts)
+                if seconds > 1_600_000_000,
+                   seconds < Date().timeIntervalSince1970 + 86400 {
+                    clock = Date(timeIntervalSince1970: seconds)
                 }
             case 7:
                 guard let now = clock, r.count >= 4 else { continue }

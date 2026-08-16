@@ -159,7 +159,9 @@ final class MarkLocator: NSObject, CLLocationManagerDelegate {
     static let shared = MarkLocator()
 
     private let manager = CLLocationManager()
-    private var completion: ((CLLocation?) -> Void)?
+    // Очередь, а не одно замыкание: две тряски подряд при холодном GPS раньше
+    // затирали completion предыдущей — первая метка молча терялась.
+    private var pending: [(CLLocation?) -> Void] = []
 
     override init() {
         super.init()
@@ -167,26 +169,26 @@ final class MarkLocator: NSObject, CLLocationManagerDelegate {
     }
 
     func fetch(_ done: @escaping (CLLocation?) -> Void) {
-        completion = done
+        pending.append(done)
         if manager.authorizationStatus == .notDetermined {
             manager.requestWhenInUseAuthorization()
         }
         manager.requestLocation()
     }
 
+    private func deliver(_ location: CLLocation?) {
+        let waiting = pending
+        pending = []
+        waiting.forEach { $0(location) }
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager,
                                      didUpdateLocations locations: [CLLocation]) {
-        Task { @MainActor in
-            self.completion?(locations.last)
-            self.completion = nil
-        }
+        Task { @MainActor in self.deliver(locations.last) }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager,
                                      didFailWithError error: Error) {
-        Task { @MainActor in
-            self.completion?(nil)
-            self.completion = nil
-        }
+        Task { @MainActor in self.deliver(nil) }
     }
 }

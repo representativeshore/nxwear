@@ -18,10 +18,15 @@ enum ChartLook {
     static let corner: CGFloat = 4
     static let axisCount = 3
 
-    /// Подписи всех семи дней. Задаются явно, иначе график рисует только те
-    /// дни, где есть данные, и один день растягивается на всю ширину.
-    static func labels(_ days: [Date]) -> [String] {
-        days.map(Fmt.weekdayShort)
+    /// Диапазон оси X по датам. Раньше X был строкой дня недели, и на месяце
+    /// «пн»…«вс» повторялись — Charts считал их одной категорией и клеил бары
+    /// разных недель в семь столбцов. Теперь X — дата (уникальна), а диапазон
+    /// задаём явно, чтобы крайние пустые дни тоже занимали своё место.
+    static func xDomain(_ days: [Date]) -> ClosedRange<Date> {
+        let lo = days.min() ?? Date()
+        let hi = days.max() ?? Date()
+        let pad: TimeInterval = 12 * 3600
+        return lo.addingTimeInterval(-pad)...hi.addingTimeInterval(pad)
     }
 }
 
@@ -56,7 +61,7 @@ struct SleepWeekChart: View {
                 if let night = item.night {
                     ForEach(stackedBars(for: night), id: \.stage) { bar in
                         BarMark(
-                            x: .value("День", Fmt.weekdayShort(item.day)),
+                            x: .value("День", item.day),
                             yStart: .value("От", bar.from),
                             yEnd: .value("До", bar.to),
                             width: ChartLook.barWidth(week.count))
@@ -73,7 +78,7 @@ struct SleepWeekChart: View {
             }
         }
         .chartForegroundStyleScale(domain: order.map(\.title), range: order.map(\.color))
-        .chartXScale(domain: ChartLook.labels(week.map(\.day)))
+        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
         .chartYScale(domain: 0...maxMinutes)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
@@ -87,7 +92,12 @@ struct SleepWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                AxisMarks { _ in AxisValueLabel().font(.caption2) }
+                // X теперь дата — подписи дней недели ставим сами по каждому дню.
+                AxisMarks(values: week.map(\.day)) { value in
+                    if let day = value.as(Date.self) {
+                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                    }
+                }
             } else {
                 AxisMarks { _ in }
             }
@@ -144,21 +154,21 @@ struct MetricWeekChart: View {
         Chart {
             ForEach(Array(week.enumerated()), id: \.offset) { _, item in
                 if let stat = item.stat {
-                    BarMark(x: .value("День", Fmt.weekdayShort(item.day)),
+                    BarMark(x: .value("День", item.day),
                             yStart: .value("Мин", stat.low),
                             yEnd: .value("Макс", stat.high),
                             width: ChartLook.barWidth(week.count))
                         .foregroundStyle(tint.opacity(0.28))
                         .cornerRadius(ChartLook.corner)
 
-                    PointMark(x: .value("День", Fmt.weekdayShort(item.day)),
+                    PointMark(x: .value("День", item.day),
                               y: .value("Среднее", stat.average))
                         .foregroundStyle(tint)
                         .symbolSize(60)
                 }
             }
         }
-        .chartXScale(domain: ChartLook.labels(week.map(\.day)))
+        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
         .chartYScale(domain: bounds)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
@@ -172,7 +182,12 @@ struct MetricWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                AxisMarks { _ in AxisValueLabel().font(.caption2) }
+                // X теперь дата — подписи дней недели ставим сами по каждому дню.
+                AxisMarks(values: week.map(\.day)) { value in
+                    if let day = value.as(Date.self) {
+                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                    }
+                }
             } else {
                 AxisMarks { _ in }
             }
@@ -195,7 +210,7 @@ struct StepsWeekChart: View {
     var body: some View {
         Chart {
             ForEach(week) { day in
-                BarMark(x: .value("День", Fmt.weekdayShort(day.day)),
+                BarMark(x: .value("День", day.day),
                         y: .value("Шаги", day.steps),
                         width: ChartLook.barWidth(week.count))
                     .foregroundStyle(Palette.steps)
@@ -217,7 +232,7 @@ struct StepsWeekChart: View {
                     .foregroundStyle(Palette.grid)
             }
         }
-        .chartXScale(domain: ChartLook.labels(week.map(\.day)))
+        .chartXScale(domain: ChartLook.xDomain(week.map(\.day)))
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: ChartLook.axisCount)) { value in
                 AxisGridLine().foregroundStyle(Palette.grid)
@@ -230,7 +245,12 @@ struct StepsWeekChart: View {
         }
         .chartXAxis {
             if ChartLook.showsDays(week.count) {
-                AxisMarks { _ in AxisValueLabel().font(.caption2) }
+                // X теперь дата — подписи дней недели ставим сами по каждому дню.
+                AxisMarks(values: week.map(\.day)) { value in
+                    if let day = value.as(Date.self) {
+                        AxisValueLabel { Text(Fmt.weekdayShort(day)).font(.caption2) }
+                    }
+                }
             } else {
                 AxisMarks { _ in }
             }

@@ -158,14 +158,14 @@ private struct Tile: View {
     private func measureNow() async {
         switch metric {
         case .heart:
+            // Через keep (а не store.absorbHarvest напрямую) — тогда замер, как
+            // и HRV/температура, уходит и в «Здоровье», а не оседает только у нас.
             if let v = await collector.measureHeart().map(Double.init) {
-                store.absorbHarvest(heart: [MetricPoint(time: Date(), value: v)],
-                                    oxygen: [], steps: [])
+                collector.keep(v, as: \.heart)
             }
         case .oxygen:
             if let v = await collector.measureOxygen().map(Double.init) {
-                store.absorbHarvest(heart: [],
-                                    oxygen: [MetricPoint(time: Date(), value: v)], steps: [])
+                collector.keep(v, as: \.oxygen)
             }
         case .hrv:
             if let v = await collector.measureHRV() { collector.keep(v, as: \.hrv) }

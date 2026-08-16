@@ -135,7 +135,7 @@ final class BrasletStore: ObservableObject {
                        sleep: [SleepSegment] = [],
                        hrv: [MetricPoint] = [],
                        temperature: [MetricPoint] = []) -> Int {
-        var added = mergeSleep(sleep)
+        var added = mergeSleep(sleep, finalize: false)
         added += mergePoints(heart.filter { Self.plausible($0, forHeart: true) },
                              into: \.heart)
         added += mergePoints(oxygen.filter { Self.plausible($0, forHeart: false) },
@@ -205,7 +205,10 @@ final class BrasletStore: ObservableObject {
     }
 
     @discardableResult
-    private func mergeSleep(_ incoming: [SleepSegment]) -> Int {
+    /// `finalize: false` — только слить и отсортировать, без rebuild()/save():
+    /// зовущий (absorbHarvest) финализирует сам один раз в конце, иначе на
+    /// каждый пакет со сном шли двойная запись на диск и двойной reload виджета.
+    private func mergeSleep(_ incoming: [SleepSegment], finalize: Bool = true) -> Int {
         var known = Set(data.sleep.map(Self.key))
         var added = 0
         for segment in incoming where !known.contains(Self.key(segment)) {
@@ -215,8 +218,10 @@ final class BrasletStore: ObservableObject {
         }
         if added > 0 {
             data.sleep.sort { $0.start < $1.start }
-            rebuild()
-            save()
+            if finalize {
+                rebuild()
+                save()
+            }
         }
         return added
     }
