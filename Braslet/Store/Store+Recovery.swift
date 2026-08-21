@@ -88,6 +88,15 @@ extension BrasletStore {
             out.append(Locked(id: "fitness", title: "Форма (Banister)",
                               have: loadActive, need: 28))
         }
+        // Финальный босс: нейросеть (LSTM) по поминутному пульсу. Имеет смысл
+        // только на годе данных — на сотнях точек переобучится в мусор. Висит
+        // в списке, чтобы к нему стремиться и не забыть через год. Прогресс —
+        // по реальным дням, за которые в базе есть пульс.
+        let heartDays = Set(heart.map { Calendar.current.startOfDay(for: $0.time) }).count
+        if heartDays < 365 {
+            out.append(Locked(id: "lstm", title: "Нейросеть (LSTM)",
+                              have: heartDays, need: 365))
+        }
         return out.sorted { $0.daysLeft < $1.daysLeft }
     }
 
