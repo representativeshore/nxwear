@@ -13,7 +13,11 @@ struct DetailCard: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if metric == .recovery {
-                RecoveryDetail(store: store)
+                // Факторы + три модели на одной странице: при нехватке высоты
+                // карточка тихо прокручивается, вместо того чтобы резать низ.
+                ScrollView(showsIndicators: false) {
+                    RecoveryDetail(store: store)
+                }
             } else {
                 metricDetail
             }
@@ -118,6 +122,140 @@ private struct RecoveryDetail: View {
             ForEach(score.factors) { factor in
                 FactorRow(factor: factor)
             }
+
+            // Модели — компактно, той же строкой-стилистикой, что и факторы.
+            ModelsBlock(store: store)
+        }
+    }
+}
+
+// MARK: - Модели: ACWR, HRV-коридор, влияния
+
+/// Три модели поверх факторов на той же странице: нагрузка острая/хроническая,
+/// HRV-коридор и «что на что влияет». Каждая показывается, только когда данных
+/// хватает — иначе строка не занимает место.
+private struct ModelsBlock: View {
+    @ObservedObject var store: BrasletStore
+
+    var body: some View {
+        let acwr = store.acwr
+        let corridor = store.hrvCorridor
+        let influences = store.influences
+
+        if acwr?.ratio != nil || corridor != nil || !influences.isEmpty {
+            Divider().padding(.vertical, 2)
+        }
+
+        if let acwr, let ratio = acwr.ratio, let zone = acwr.zone {
+            HStack(spacing: 8) {
+                Text("Нагрузка 7/28 дн")
+                    .font(.caption)
+                Spacer()
+                Circle().fill(zoneColor(zone)).frame(width: 7, height: 7)
+                Text(String(format: "%.2f · %@", ratio, zoneText(zone))
+                        .replacingOccurrences(of: ".", with: ","))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if let c = corridor {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("HRV-коридор")
+                        .font(.caption)
+                    Spacer()
+                    Text(corridorText(c))
+                        .font(.caption2)
+                        .foregroundStyle(c.suggestsDeload ? Palette.heart : .secondary)
+                }
+                CorridorBar(corridor: c)
+            }
+        }
+
+        if !influences.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Что на что влияет")
+                    .font(.caption)
+                ForEach(influences.prefix(3)) { inf in
+                    HStack(spacing: 6) {
+                        Text(inf.text)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        Spacer(minLength: 4)
+                        Text(String(format: "r %.2f", inf.r)
+                                .replacingOccurrences(of: ".", with: ","))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func zoneColor(_ z: Models.ACWR.Zone) -> Color {
+        switch z {
+        case .sweet: return Palette.oxygen
+        case .caution: return Palette.temperature
+        case .danger: return Palette.heart
+        case .detraining: return Palette.steps
+        }
+    }
+
+    private func zoneText(_ z: Models.ACWR.Zone) -> String {
+        switch z {
+        case .sweet: return "в норме"
+        case .caution: return "на грани"
+        case .danger: return "перебор"
+        case .detraining: return "мало"
+        }
+    }
+
+    private func corridorText(_ c: Models.HRVCorridor) -> String {
+        if c.suggestsDeload { return "ниже \(c.daysBelow) дн. — разгрузка" }
+        switch c.status {
+        case .below: return "ниже коридора"
+        case .above: return "выше — адаптируешься"
+        case .inside: return "в коридоре"
+        }
+    }
+}
+
+/// Мини-полоса коридора: серая зона ±SWC, метка — текущее 7-дневное среднее.
+private struct CorridorBar: View {
+    let corridor: Models.HRVCorridor
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Palette.grid).frame(height: 4)
+                Capsule().fill(Palette.hrv.opacity(0.35))
+                    .frame(width: max(2, x(corridor.upper, w) - x(corridor.lower, w)), height: 4)
+                    .offset(x: x(corridor.lower, w))
+                Circle().fill(markColor)
+                    .frame(width: 9, height: 9)
+                    .offset(x: x(corridor.rolling, w) - 4.5)
+            }
+            .frame(height: 9)
+        }
+        .frame(height: 9)
+    }
+
+    /// Шкала: коридор занимает середину, по краям запас в один коридор.
+    private func x(_ v: Double, _ width: CGFloat) -> CGFloat {
+        let span = max(corridor.upper - corridor.lower, 0.001)
+        let lo = corridor.lower - span, hi = corridor.upper + span
+        return CGFloat((min(max(v, lo), hi) - lo) / (hi - lo)) * width
+    }
+
+    private var markColor: Color {
+        switch corridor.status {
+        case .below: return corridor.suggestsDeload ? Palette.heart : Palette.temperature
+        case .above: return Palette.oxygen
+        case .inside: return Palette.hrv
         }
     }
 }
@@ -147,12 +285,13 @@ private struct FactorRow: View {
         }
     }
 
-    /// У нагрузки «выше/ниже нормы» читалось бы наоборот (z инвертирован),
-    /// поэтому показываем фактические калории тренировки за день.
+    /// У нагрузки «выше/ниже нормы» читалось бы наоборот (z инвертирован).
+    /// Значение фактора — накопленная усталость по Banister (τ=7), в ккал-
+    /// эквиваленте; показываем её, чтобы было видно, как спадает после тяжёлых дней.
     private var statusText: String {
         if factor.key == .trainingLoad {
-            let kcal = Int((factor.today ?? 0).rounded())
-            return kcal > 0 ? "\(kcal) ккал" : "нет"
+            let fatigue = Int((factor.today ?? 0).rounded())
+            return fatigue > 0 ? "усталость \(fatigue)" : "нет"
         }
         guard let z = factor.z else { return "" }
         if z > 0.4 { return "выше нормы" }

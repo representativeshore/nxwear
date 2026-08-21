@@ -240,5 +240,54 @@ let mins = SleepStaging.minutes(from: smp)
 check(mins.count == 1, "четыре секунды → одна минута")
 check(mins.first?.pulse == 61, "медиана пульса за минуту")
 
+print("\nМодели нагрузки, HRV-коридор, корреляции:")
+
+// ACWR: ровная нагрузка 100/день → отношение 1.0, «сладкая зона».
+let flatLoad = Array(repeating: 100.0, count: 28)
+let acwrFlat = Models.acwr(load: flatLoad)
+check(acwrFlat?.ratio.map { abs($0 - 1.0) < 0.001 } == true, "ACWR ровной нагрузки = 1.0")
+check(acwrFlat?.zone == .sweet, "ровная нагрузка — сладкая зона")
+
+// Резкий скачок: 21 день по 50, потом неделя по 200 → acute 200, chronic 87.5 → 2.29 — опасно.
+let spike = Array(repeating: 50.0, count: 21) + Array(repeating: 200.0, count: 7)
+check(Models.acwr(load: spike)?.zone == .danger, "скачок нагрузки — опасная зона")
+check(Models.acwr(load: [1, 2, 3]) == nil, "ACWR требует ≥7 дней")
+check(Models.acwr(load: Array(repeating: 0.0, count: 10))?.ratio == nil,
+      "без хроники отношение не определено")
+
+// Banister: после одного импульса усталость спадает быстрее формы.
+let oneHit = [100.0] + Array(repeating: 0.0, count: 13)
+let ban = Models.banister(load: oneHit)
+check(ban.fatigue < ban.fitness, "через 2 недели усталость ниже формы (τ 7 vs 42)")
+check(ban.fatigue > 0 && ban.fatigue < 20, "усталость τ=7 за 13 дней упала ниже 20%")
+let fs = Models.fatigueSeries(load: oneHit)
+check(fs.count == 14 && fs[0] == 100 && fs[1] < fs[0], "серия усталости: импульс и спад")
+
+// HRV-коридор: ровный ряд 50 → в коридоре, разгрузка не нужна.
+let flatHRV = Array(repeating: 50.0, count: 30)
+let corrFlat = Models.hrvCorridor(hrv: flatHRV)
+check(corrFlat?.status == .inside, "ровный HRV — внутри коридора")
+check(corrFlat?.suggestsDeload == false, "ровный HRV — без разгрузки")
+// Падение: 28 дней ~50±2, потом 3 дня 30 → 7-дн среднее ниже коридора ≥2 дня.
+var drop: [Double] = []
+for i in 0..<28 { drop.append(50 + (i % 2 == 0 ? 2 : -2)) }
+drop += [30, 30, 30]
+let corrDrop = Models.hrvCorridor(hrv: drop)
+check(corrDrop?.status == .below, "обвал HRV — ниже коридора")
+check(corrDrop?.suggestsDeload == true, "обвал HRV 3 дня — разгрузка")
+check(Models.hrvCorridor(hrv: [50, 50, 50]) == nil, "коридор требует ≥14 дней")
+
+// Лаговая корреляция: y = x, сдвинутый на 1 день → лучший лаг 1, r≈1.
+let xSig: [Double] = (0..<20).map { Double($0 % 5) }          // 0,1,2,3,4,0,1,...
+let yLag1: [Double] = [0.0] + Array(xSig.dropLast())            // y[i] = x[i-1]
+// y сегодня = x вчера → x[i] связан с y[i+1] → лаг 1.
+let lc = Models.lagCorrelation(x: xSig, y: yLag1)
+check(lc?.lag == 1, "лаг восстановлен = 1")
+check(lc.map { $0.r > 0.95 } == true, "корреляция сдвинутого сигнала ≈ 1")
+check(lc?.isMeaningful == true, "связь значима")
+check(Models.lagCorrelation(x: [1, 2, 3], y: [1, 2, 3]) == nil, "корреляция требует ≥14 точек")
+// Шум: константа не коррелирует (sd=0 → nil у Пирсона).
+check(Models.pearson([1, 1, 1, 1], [1, 2, 3, 4]) == nil, "константа — корреляции нет")
+
 print(failures == 0 ? "\nВсе проверки пройдены." : "\nПровалено проверок: \(failures)")
 exit(failures == 0 ? 0 : 1)

@@ -20,12 +20,65 @@ extension BrasletStore {
     }
 
     /// Оценка восстановления. Считается из дневных рядов показателей покоя.
+    /// Нагрузка подаётся не «вчерашними ккал», а НАКОПЛЕННОЙ усталостью по
+    /// Banister (τ=7): тяжёлая неделя давит сильнее одной тяжёлой тренировки,
+    /// и спад идёт плавно, а не обрывается наутро.
     var recovery: Recovery.Score {
         Recovery.compute(hrv: dailySeries(hrv),
                          restingHeart: restingHeartSeries(),
                          deepSleepMinutes: deepSleepSeries(),
                          temperature: dailySeries(temperature),
-                         trainingLoad: workoutLoad)
+                         trainingLoad: Models.fatigueSeries(load: workoutLoad))
+    }
+
+    // MARK: - Модели для разбора
+
+    /// Острая/хроническая нагрузка (7 дн / 28 дн).
+    var acwr: Models.ACWR? { Models.acwr(load: workoutLoad) }
+
+    /// HRV-коридор: 7-дневное среднее против личного коридора ±0.5σ.
+    var hrvCorridor: Models.HRVCorridor? { Models.hrvCorridor(hrv: dailySeries(hrv, days: 60)) }
+
+    /// Что на что влияет — лаговые корреляции по личным данным. Только
+    /// значимые (|r| ≥ 0.3, ≥14 точек), отсортированы по силе.
+    struct Influence: Identifiable {
+        let id: String
+        let text: String
+        let r: Double
+    }
+
+    var influences: [Influence] {
+        let hrvS = dailySeries(hrv, days: 60)
+        let rhrS = restingHeartSeries(days: 60)
+        let deepS = deepSleepSeries(days: 60)
+        let stepsS = steps.suffix(60).map { Double($0.steps) }
+        let sleepS = nights.sorted { $0.start < $1.start }.suffix(60)
+                           .map { $0.asleepDuration / 60 }
+        let load = workoutLoad
+
+        // Пары (причина → следствие): ожидаемый знак, чтобы фраза была честной.
+        let pairs: [(id: String, cause: String, effect: String, x: [Double], y: [Double])] = [
+            ("load-hrv",   "нагрузка",      "HRV",         load,   hrvS),
+            ("load-rhr",   "нагрузка",      "пульс покоя", load,   rhrS),
+            ("deep-hrv",   "глубокий сон",  "HRV",         deepS,  hrvS),
+            ("steps-sleep","шаги",          "сон",         stepsS, sleepS),
+            ("sleep-hrv",  "сон",           "HRV",         sleepS, hrvS),
+        ]
+
+        return pairs.compactMap { p in
+            guard let c = Models.lagCorrelation(x: p.x, y: p.y), c.isMeaningful else { return nil }
+            let dir = c.r > 0 ? "выше" : "ниже"
+            let when: String
+            switch c.lag {
+            case 0: when = "в тот же день"
+            case 1: when = "на следующий день"
+            default: when = "через \(c.lag) дня"
+            }
+            return Influence(id: p.id,
+                             text: "\(p.cause) ↑ → \(p.effect) \(dir) \(when)",
+                             r: c.r)
+        }
+        .sorted { abs($0.r) > abs($1.r) }
     }
 
     /// Тянет тренировки из «Здоровья» и складывает дневную серию калорий
