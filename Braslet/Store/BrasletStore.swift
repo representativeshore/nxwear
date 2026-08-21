@@ -296,44 +296,11 @@ final class BrasletStore: ObservableObject {
         save()
     }
 
-    /// Ужимает историю, чтобы она не росла без конца.
-    ///
-    /// **Текущий месяц храним поштучно** — из него строитсямесячная страница,
-    /// где столбик на каждый день. Всё, что раньше, схлопывается в одно
-    /// среднее на месяц: разброс по дням прошлого марта никому не нужен.
-    /// Сон и шаги не трогаем: у них и так по записи в день.
-    private func compact() {
-        data.heart = Self.compacted(data.heart)
-        data.oxygen = Self.compacted(data.oxygen)
-        data.hrv = Self.compacted(data.hrv)
-        data.temperature = Self.compacted(data.temperature)
-    }
-
-    private static func compacted(_ points: [MetricPoint],
-                                  now: Date = Date()) -> [MetricPoint] {
-        let calendar = Calendar.current
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month],
-                                                                     from: now)) ?? now
-
-        var recent: [MetricPoint] = []
-        var byBucket: [Date: [Double]] = [:]
-
-        for point in points {
-            if point.time >= monthStart {
-                recent.append(point)
-            } else {
-                let bucket = calendar.date(from: calendar.dateComponents([.year, .month],
-                                                                         from: point.time))
-                    ?? point.time
-                byBucket[bucket, default: []].append(point.value)
-            }
-        }
-
-        let averaged = byBucket.map { bucket, values in
-            MetricPoint(time: bucket, value: values.reduce(0, +) / Double(values.count))
-        }
-        return (averaged + recent).sorted { $0.time < $1.time }
-    }
+    // Историю НЕ ужимаем. Раньше здесь было `compact()`: всё старше текущего
+    // месяца схлопывалось в одно среднее на месяц. Это убито намеренно —
+    // поштучная история копится под будущие модели (годовые ряды для LSTM),
+    // HRV-коридору нужны 60 дней поштучно, а объём копеечный: ~35 байт на
+    // точку, поминутный пульс за год ≈ 18 МБ. Не возвращать.
 
     /// Живой заряд из потока браслета.
     ///
@@ -348,7 +315,6 @@ final class BrasletStore: ObservableObject {
     }
 
     private func rebuild() {
-        compact()
         publishToWidget()
         // Сном считаем только эпизоды дольше полутора часов. Короткие
         // (дневная неподвижность, минутная дрёма) — не сон: разметка из DLOG

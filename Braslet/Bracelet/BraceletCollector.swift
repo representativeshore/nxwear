@@ -868,8 +868,11 @@ final class BraceletCollector: NSObject, ObservableObject {
         }
     }
 
-    /// Пишет сырой DLOG-батч в файл (hex, по записи в строку). Держим
-    /// последние ~20 файлов в папке приложения — доступны через «Файлы».
+    /// Пишет сырой DLOG-батч в файл (hex, по записи в строку) в папку
+    /// приложения — доступны через «Файлы». Храним ВСЁ, без ротации: это
+    /// посекундный пульс+движение, самое ценное сырьё под будущие модели
+    /// (годовые ряды для LSTM). Объём копеечный: 20 батчей ≈ 26 КБ, за год —
+    /// единицы МБ. Прежняя ротация «20 последних» уже стёрла первую неделю.
     private func saveRawDLOG(_ records: [[UInt8]]) {
         let fm = FileManager.default
         guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -882,13 +885,6 @@ final class BraceletCollector: NSObject, ObservableObject {
             .joined(separator: "\n")
         try? hex.write(to: dir.appendingPathComponent("dlog-\(stamp).hex"),
                        atomically: true, encoding: .utf8)
-
-        // Чистим старьё: оставляем 20 последних.
-        if let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "hex" }).sorted(by: { $0.path > $1.path }),
-           files.count > 20 {
-            files.dropFirst(20).forEach { try? fm.removeItem(at: $0) }
-        }
     }
 
     private func absorb(type: UInt8, body: Data) {
