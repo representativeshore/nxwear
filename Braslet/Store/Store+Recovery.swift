@@ -39,6 +39,58 @@ extension BrasletStore {
     /// HRV-коридор: 7-дневное среднее против личного коридора ±0.5σ.
     var hrvCorridor: Models.HRVCorridor? { Models.hrvCorridor(hrv: dailySeries(hrv, days: 60)) }
 
+    // MARK: - Разблокировка характеристик
+
+    /// Характеристика, которой ещё не хватает истории: сколько дней набрано и
+    /// сколько нужно. Вместо того чтобы прятать её, показываем замок и обратный
+    /// отсчёт — видно, что впереди и сколько осталось.
+    struct Locked: Identifiable {
+        let id: String
+        let title: String
+        let have: Int
+        let need: Int
+        var daysLeft: Int { max(0, need - have) }
+        var progress: Double { need > 0 ? min(1, Double(have) / Double(need)) : 1 }
+    }
+
+    /// Все характеристики, которые пока заблокированы (в порядке близости к
+    /// разблокировке — ближайшая первой).
+    var locked: [Locked] {
+        var out: [Locked] = []
+        let hrvDays = dailySeries(hrv, days: 60).count
+        let loadDays = workoutLoad.count
+        let loadActive = workoutLoad.filter { $0 > 0 }.count
+
+        // Точность готовности: baseline HRV на 14 дней.
+        if hrvDays < 14 {
+            out.append(Locked(id: "confidence", title: "Точная готовность",
+                              have: hrvDays, need: 14))
+        }
+        // ACWR: 7 дней нагрузки, при этом нужна хоть какая-то хроника.
+        if acwr?.ratio == nil {
+            out.append(Locked(id: "acwr", title: "Нагрузка 7/28 дн",
+                              have: min(loadDays, 7), need: 7))
+        }
+        // HRV-коридор: 14 дней HRV.
+        if hrvCorridor == nil {
+            out.append(Locked(id: "corridor", title: "HRV-коридор",
+                              have: hrvDays, need: 14))
+        }
+        // Влияния: 14 перекрывающихся дней; считаем по HRV (главный ряд) и
+        // по дням с тренировками — без них пары с нагрузкой не посчитать.
+        if influences.isEmpty {
+            out.append(Locked(id: "influences", title: "Что на что влияет",
+                              have: min(hrvDays, 14), need: 14))
+        }
+        // Тренировочная хроника для Banister-формы (τ=42): полная через 28 дней
+        // с тренировками — до того усталость считается, но форма грубая.
+        if loadActive < 28 {
+            out.append(Locked(id: "fitness", title: "Форма (Banister)",
+                              have: loadActive, need: 28))
+        }
+        return out.sorted { $0.daysLeft < $1.daysLeft }
+    }
+
     /// Что на что влияет — лаговые корреляции по личным данным. Только
     /// значимые (|r| ≥ 0.3, ≥14 точек), отсортированы по силе.
     struct Influence: Identifiable {

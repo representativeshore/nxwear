@@ -112,20 +112,73 @@ private struct RecoveryDetail: View {
                     .foregroundStyle(.secondary)
             }
 
-            if case .building(let days) = score.confidence {
-                Label("балл живой, точность растёт (\(days) дн. базы, полная на 14)",
-                      systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
             ForEach(score.factors) { factor in
                 FactorRow(factor: factor)
             }
 
             // Модели — компактно, той же строкой-стилистикой, что и факторы.
             ModelsBlock(store: store)
+
+            // Что ещё не набрало историю — не прячем, а показываем замком с
+            // обратным отсчётом: видно, что впереди и сколько осталось.
+            LockedBlock(locked: store.locked)
         }
+    }
+}
+
+// MARK: - Заблокированные характеристики
+
+/// «Характеристика заблокирована, до разблокировки N дней» — как в игре.
+/// Замок, отсчёт и полоска прогресса. Ближайшая к разблокировке — первой.
+private struct LockedBlock: View {
+    let locked: [BrasletStore.Locked]
+
+    var body: some View {
+        if !locked.isEmpty {
+            Divider().padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text("Заблокировано")
+                        .font(.caption)
+                }
+                ForEach(locked) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(item.title)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(countdown(item))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Palette.grid).frame(height: 3)
+                                Capsule().fill(Palette.hrv.opacity(0.6))
+                                    .frame(width: max(3, geo.size.width * item.progress), height: 3)
+                            }
+                        }
+                        .frame(height: 3)
+                    }
+                }
+            }
+        }
+    }
+
+    private func countdown(_ item: BrasletStore.Locked) -> String {
+        let d = item.daysLeft
+        if d == 0 { return "вот-вот" }
+        let word: String
+        switch d % 10 {
+        case 1 where d % 100 != 11: word = "день"
+        case 2...4 where !(12...14).contains(d % 100): word = "дня"
+        default: word = "дней"
+        }
+        return "\(item.have)/\(item.need) · ещё \(d) \(word)"
     }
 }
 

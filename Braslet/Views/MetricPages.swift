@@ -242,8 +242,12 @@ enum MetricStyle {
             return [comma(String(format: "сутки %.1f–%.1f°", r.min, r.max))]
         case .recovery:
             var lines: [String] = []
-            if case .building = store.recovery.confidence { lines.append("точность растёт") }
-            else { lines.append(recoveryLevelText(store.recovery.level)) }
+            if case .building(let days) = store.recovery.confidence {
+                // Игровой замок вместо «точность растёт»: видно, сколько осталось.
+                lines.append("🔒 точность: ещё \(max(0, 14 - days)) дн.")
+            } else {
+                lines.append(recoveryLevelText(store.recovery.level))
+            }
             lines.append(store.recovery.recommendation)
             return lines
         }
