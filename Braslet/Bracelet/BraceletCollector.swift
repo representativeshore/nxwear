@@ -1013,6 +1013,8 @@ extension BraceletCollector: CBCentralManagerDelegate, CBPeripheralDelegate {
         Task { @MainActor in
             isConnected = true
             reassembler = BraceletProtocol.Reassembler()
+            // Вернулся на связь, снимаем заявку «пропал со связи».
+            Notifier.cancelConnectionLost()
             peripheral.discoverServices([Self.service])
         }
     }
@@ -1029,6 +1031,9 @@ extension BraceletCollector: CBCentralManagerDelegate, CBPeripheralDelegate {
             reassembler = BraceletProtocol.Reassembler()
             journal.add("браслет отключился")
             state = "браслет отключился, жду возвращения"
+            // Отложенный сигнал на полчаса. Вернётся раньше, снимем в didConnect,
+            // не вернётся, значит сел или снят надолго, и придёт уведомление.
+            Notifier.connectionLost()
             // Заявка снова висит бесконечно — iOS подключит, когда он появится.
             manager.connect(peripheral, options: nil)
         }

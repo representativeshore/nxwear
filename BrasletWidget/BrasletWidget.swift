@@ -14,9 +14,15 @@ import WidgetKit
 struct BrasletWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "BrasletWidget", provider: Provider()) { entry in
+            let stale = entry.snapshot.isStale
             WidgetFace(snapshot: entry.snapshot)
+                .modifier(StaleVeil(stale: stale))
                 .containerBackground(for: .widget) {
-                    WidgetBackground(lowBattery: entry.snapshot.battery.map { $0 < 20 } ?? false)
+                    // Красный «низкий заряд» только на свежих данных. На протухших
+                    // заряд неизвестен, красить в тревогу нельзя, соврём.
+                    WidgetBackground(
+                        lowBattery: !stale && (entry.snapshot.battery.map { $0 < 20 } ?? false),
+                        stale: stale)
                 }
         }
         .configurationDisplayName("Браслет")
@@ -84,6 +90,8 @@ enum Tone {
 struct WidgetBackground: View {
     /// Заряд браслета ниже 20% — фон становится красным.
     let lowBattery: Bool
+    /// Данные протухли. Цветные подсветки гасим, они читаются как живые.
+    var stale: Bool = false
 
     @Environment(\.widgetFamily) private var family
 
@@ -104,7 +112,7 @@ struct WidgetBackground: View {
                 // Угловые подсветки — подсказка «где какая плитка» — верны только
                 // для сеточного layout (small/medium). У большого виджета своя
                 // раскладка (шапка + 5 плиток + кнопка), там они бы врали.
-                if family != .systemLarge {
+                if !stale && family != .systemLarge {
                     corner(corners.topLeading, at: .topLeading)
                     corner(corners.topTrailing, at: .topTrailing)
                     corner(corners.bottomLeading, at: .bottomLeading)
@@ -117,6 +125,35 @@ struct WidgetBackground: View {
     private func corner(_ tone: Color, at point: UnitPoint) -> some View {
         RadialGradient(colors: [tone.opacity(0.22), tone.opacity(0)],
                        center: point, startRadius: 0, endRadius: 110)
+    }
+}
+
+/// Вуаль поверх протухших данных. Гасит плитки прозрачностью и вешает в углу
+/// значок обрыва связи, чтобы старые числа не читались как свежие. Значок сам
+/// не приглушён, он поверх, и остаётся заметным.
+struct StaleVeil: ViewModifier {
+    let stale: Bool
+    @Environment(\.widgetFamily) private var family
+
+    func body(content: Content) -> some View {
+        if stale {
+            content
+                .opacity(0.4)
+                .overlay(alignment: .topTrailing) { badge }
+        } else {
+            content
+        }
+    }
+
+    private var badge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+            if family != .systemSmall {
+                Text("нет связи")
+            }
+        }
+        .font(.system(size: family == .systemSmall ? 11 : 12, weight: .semibold))
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -258,8 +295,9 @@ struct LargeFace: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 6) {
-                BatteryMini(percent: snapshot.battery)
-                Text("обновлено \(updatedText)")
+                BatteryMini(percent: snapshot.battery, stale: snapshot.isStale)
+                Text(snapshot.isStale ? "нет связи, \(updatedText)"
+                                      : "обновлено \(updatedText)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -345,9 +383,12 @@ struct LargeFace: View {
 /// по уровню. Своя, а не из приложения — виджет-таргет его файлы не видит.
 struct BatteryMini: View {
     let percent: Int?
+    /// Данные протухли. Заливку красим серым, уровень уже неактуален.
+    var stale: Bool = false
 
     private var frac: CGFloat { CGFloat(max(0, min(100, percent ?? 0))) / 100 }
     private var color: Color {
+        if stale { return .secondary }
         switch percent ?? 100 {
         case ..<15: return Tone.heart
         case ..<40: return Tone.temperature

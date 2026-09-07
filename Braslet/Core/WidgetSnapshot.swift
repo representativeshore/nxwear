@@ -21,6 +21,11 @@ struct WidgetSnapshot: Codable {
     var sleep: TimeInterval?
     var updated: Date
 
+    /// Данные протухли, если обновления не было больше часа. Браслет мерит раз
+    /// в полчаса, час это два пропущенных цикла, дальше числа врут и виджет
+    /// показывает их приглушённо. distantPast у пустого снапшота тоже протух.
+    var isStale: Bool { Date().timeIntervalSince(updated) > 60 * 60 }
+
     static let empty = WidgetSnapshot(recovery: nil, steps: nil, heart: nil,
                                       oxygen: nil, hrv: nil, temperature: nil,
                                       battery: nil, sleep: nil, updated: .distantPast)

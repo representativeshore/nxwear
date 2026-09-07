@@ -23,4 +23,30 @@ enum Notifier {
             UNNotificationRequest(identifier: "braslet.lowBattery",
                                   content: content, trigger: nil))
     }
+
+    /// Браслет пропал со связи. Заряд приложение видит только пока браслет
+    /// на связи, поэтому севший вне связи браслет порог low battery не поймает.
+    /// Отдельный сигнал закрывает эту дыру. Планируем отложенный на полчаса,
+    /// а не шлём сразу, чтобы короткий разрыв BLE его не поднял. При возврате
+    /// на связь заявку снимаем в cancelConnectionLost, до срабатывания.
+    static func connectionLost(after seconds: TimeInterval = 30 * 60) {
+        let content = UNMutableNotificationContent()
+        content.title = "Браслет пропал со связи"
+        content.body = "Полчаса тишины, возможно разрядился или снят."
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: seconds,
+                                                        repeats: false)
+        // Один идентификатор, повторный разрыв заменяет прежнюю заявку.
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "braslet.connectionLost",
+                                  content: content, trigger: trigger))
+    }
+
+    /// Снимает и запланированное, и уже показанное «пропал со связи».
+    /// Зовём при возвращении браслета на связь.
+    static func cancelConnectionLost() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["braslet.connectionLost"])
+        center.removeDeliveredNotifications(withIdentifiers: ["braslet.connectionLost"])
+    }
 }
